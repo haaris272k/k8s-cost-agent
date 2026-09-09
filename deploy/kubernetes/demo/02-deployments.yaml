@@ -1,0 +1,216 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: report-generator
+  namespace: cost-agent-demo
+  annotations:
+    cost-agent/criticality: "tier-2"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: report-generator
+  template:
+    metadata:
+      labels:
+        app: report-generator
+    spec:
+      containers:
+        - name: workload
+          image: python:3.11-slim
+          command: ["python3", "-u", "/scripts/load_sim.py"]
+          env:
+            - name: CPU_LOAD_PCT
+              value: "15"
+            - name: MEM_MB
+              value: "150"
+          resources:
+            requests:
+              cpu: "800m"
+              memory: "1Gi"
+            limits:
+              cpu: "800m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+      volumes:
+        - name: script
+          configMap:
+            name: load-sim-script
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service
+  namespace: cost-agent-demo
+  annotations:
+    cost-agent/criticality: "tier-0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payment-service
+  template:
+    metadata:
+      labels:
+        app: payment-service
+    spec:
+      containers:
+        - name: workload
+          image: python:3.11-slim
+          command: ["python3", "-u", "/scripts/load_sim.py"]
+          env:
+            - name: CPU_LOAD_PCT
+              value: "10"
+            - name: MEM_MB
+              value: "150"
+            - name: TRIGGER_OOM
+              value: "true"
+            - name: OOM_INTERVAL_SEC
+              value: "240"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "400Mi"
+            limits:
+              cpu: "500m"
+              memory: "400Mi"    # deliberately tight so the periodic 500MB spike gets OOMKilled
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+      volumes:
+        - name: script
+          configMap:
+            name: load-sim-script
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spiky-worker
+  namespace: cost-agent-demo
+  annotations:
+    cost-agent/criticality: "tier-1"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spiky-worker
+  template:
+    metadata:
+      labels:
+        app: spiky-worker
+    spec:
+      containers:
+        - name: workload
+          image: python:3.11-slim
+          command: ["python3", "-u", "/scripts/load_sim.py"]
+          env:
+            - name: CPU_LOAD_PCT
+              value: "10"
+            - name: MEM_MB
+              value: "200"
+            - name: BURST
+              value: "true"
+            - name: BURST_CPU_LOAD_PCT
+              value: "70"
+            - name: BURST_INTERVAL_SEC
+              value: "300"
+            - name: BURST_DURATION_SEC
+              value: "30"
+          resources:
+            requests:
+              cpu: "600m"
+              memory: "512Mi"
+            limits:
+              cpu: "600m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+      volumes:
+        - name: script
+          configMap:
+            name: load-sim-script
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: cost-agent-demo
+  annotations:
+    cost-agent/criticality: "tier-1"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth-service
+  template:
+    metadata:
+      labels:
+        app: auth-service
+    spec:
+      containers:
+        - name: workload
+          image: python:3.11-slim
+          command: ["python3", "-u", "/scripts/load_sim.py"]
+          env:
+            - name: CPU_LOAD_PCT
+              value: "8"
+            - name: MEM_MB
+              value: "100"
+          resources:
+            requests:
+              cpu: "400m"
+              memory: "512Mi"
+            limits:
+              cpu: "400m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+      volumes:
+        - name: script
+          configMap:
+            name: load-sim-script
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+  namespace: cost-agent-demo
+  annotations:
+    cost-agent/criticality: "tier-2"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notification-service
+  template:
+    metadata:
+      labels:
+        app: notification-service
+    spec:
+      containers:
+        - name: workload
+          image: python:3.11-slim
+          command: ["python3", "-u", "/scripts/load_sim.py"]
+          env:
+            - name: CPU_LOAD_PCT
+              value: "5"
+            - name: MEM_MB
+              value: "60"
+          resources:
+            requests:
+              cpu: "300m"
+              memory: "256Mi"
+            limits:
+              cpu: "300m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+      volumes:
+        - name: script
+          configMap:
+            name: load-sim-script

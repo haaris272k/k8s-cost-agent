@@ -1,3 +1,14 @@
+Metadata-Version: 2.4
+Name: k8s-cost-agent
+Version: 2.0.0
+Summary: Explainable, guardrail-first Kubernetes resource right-sizing
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: google-genai>=1.0.0
+Requires-Dist: kubernetes==29.0.0
+Requires-Dist: prometheus-api-client==0.5.5
+Requires-Dist: python-dotenv==1.0.1
+
 # Kubernetes Cost Optimization Agent
 
 A read-only, explainable Kubernetes right-sizing pipeline built around one

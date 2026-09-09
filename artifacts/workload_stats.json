@@ -1,0 +1,157 @@
+[
+  {
+    "name": "auth-service",
+    "namespace": "cost-agent-demo",
+    "requested_cpu_cores": 0.4,
+    "requested_memory_bytes": 536870912.0,
+    "cpu_limit_cores": 0.4,
+    "memory_limit_bytes": 536870912.0,
+    "current_cpu_usage_cores": 0.07894170342143285,
+    "current_memory_usage_bytes": 109576192.0,
+    "restart_count": 0,
+    "last_restart_oomkilled": false,
+    "criticality": "tier-1",
+    "sample_count": 10,
+    "avg": {
+      "current_cpu_usage_cores": 0.07784872222440872,
+      "current_memory_usage_bytes": 109576192.0
+    },
+    "percentile_rank": 95.0,
+    "percentile": {
+      "current_cpu_usage_cores": 0.07898091462855766,
+      "current_memory_usage_bytes": 109576192.0
+    },
+    "percentile_to_avg_ratio": {
+      "current_cpu_usage_cores": 1.0145434937375755,
+      "current_memory_usage_bytes": 1.0
+    },
+    "trend": {
+      "cpu": "stable",
+      "memory": "stable"
+    }
+  },
+  {
+    "name": "notification-service",
+    "namespace": "cost-agent-demo",
+    "requested_cpu_cores": 0.3,
+    "requested_memory_bytes": 268435456.0,
+    "cpu_limit_cores": 0.3,
+    "memory_limit_bytes": 268435456.0,
+    "current_cpu_usage_cores": 0.05064335752353714,
+    "current_memory_usage_bytes": 67964928.0,
+    "restart_count": 0,
+    "last_restart_oomkilled": false,
+    "criticality": "tier-2",
+    "sample_count": 10,
+    "avg": {
+      "current_cpu_usage_cores": 0.05003626606308059,
+      "current_memory_usage_bytes": 67964928.0
+    },
+    "percentile_rank": 95.0,
+    "percentile": {
+      "current_cpu_usage_cores": 0.050631412061450255,
+      "current_memory_usage_bytes": 67964928.0
+    },
+    "percentile_to_avg_ratio": {
+      "current_cpu_usage_cores": 1.0118942927839452,
+      "current_memory_usage_bytes": 1.0
+    },
+    "trend": {
+      "cpu": "stable",
+      "memory": "stable"
+    }
+  },
+  {
+    "name": "payment-service",
+    "namespace": "cost-agent-demo",
+    "requested_cpu_cores": 0.5,
+    "requested_memory_bytes": 419430400.0,
+    "cpu_limit_cores": 0.5,
+    "memory_limit_bytes": 419430400.0,
+    "current_cpu_usage_cores": 0.019732389196140104,
+    "current_memory_usage_bytes": 163532800.0,
+    "restart_count": 541,
+    "last_restart_oomkilled": true,
+    "criticality": "tier-0",
+    "sample_count": 10,
+    "avg": {
+      "current_cpu_usage_cores": 0.015913379118778423,
+      "current_memory_usage_bytes": 163532800.0
+    },
+    "percentile_rank": 95.0,
+    "percentile": {
+      "current_cpu_usage_cores": 0.020510574850627142,
+      "current_memory_usage_bytes": 163532800.0
+    },
+    "percentile_to_avg_ratio": {
+      "current_cpu_usage_cores": 1.2888887204618813,
+      "current_memory_usage_bytes": 1.0
+    },
+    "trend": {
+      "cpu": "increasing",
+      "memory": "stable"
+    }
+  },
+  {
+    "name": "report-generator",
+    "namespace": "cost-agent-demo",
+    "requested_cpu_cores": 0.8,
+    "requested_memory_bytes": 1073741824.0,
+    "cpu_limit_cores": 0.8,
+    "memory_limit_bytes": 1073741824.0,
+    "current_cpu_usage_cores": 0.1403874440636587,
+    "current_memory_usage_bytes": 163205120.0,
+    "restart_count": 0,
+    "last_restart_oomkilled": false,
+    "criticality": "tier-2",
+    "sample_count": 10,
+    "avg": {
+      "current_cpu_usage_cores": 0.1457346807157198,
+      "current_memory_usage_bytes": 163205120.0
+    },
+    "percentile_rank": 95.0,
+    "percentile": {
+      "current_cpu_usage_cores": 0.1474737666866155,
+      "current_memory_usage_bytes": 163205120.0
+    },
+    "percentile_to_avg_ratio": {
+      "current_cpu_usage_cores": 1.0119332334785025,
+      "current_memory_usage_bytes": 1.0
+    },
+    "trend": {
+      "cpu": "stable",
+      "memory": "stable"
+    }
+  },
+  {
+    "name": "spiky-worker",
+    "namespace": "cost-agent-demo",
+    "requested_cpu_cores": 0.6,
+    "requested_memory_bytes": 536870912.0,
+    "cpu_limit_cores": 0.6,
+    "memory_limit_bytes": 536870912.0,
+    "current_cpu_usage_cores": 0.13380237466926426,
+    "current_memory_usage_bytes": 215818240.0,
+    "restart_count": 0,
+    "last_restart_oomkilled": false,
+    "criticality": "tier-1",
+    "sample_count": 10,
+    "avg": {
+      "current_cpu_usage_cores": 0.14443723375958084,
+      "current_memory_usage_bytes": 215818240.0
+    },
+    "percentile_rank": 95.0,
+    "percentile": {
+      "current_cpu_usage_cores": 0.15046702817715477,
+      "current_memory_usage_bytes": 215818240.0
+    },
+    "percentile_to_avg_ratio": {
+      "current_cpu_usage_cores": 1.0417468145894475,
+      "current_memory_usage_bytes": 1.0
+    },
+    "trend": {
+      "cpu": "stable",
+      "memory": "stable"
+    }
+  }
+]

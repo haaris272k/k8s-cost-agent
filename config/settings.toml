@@ -1,0 +1,60 @@
+# Paths are resolved from base_dir, which is relative to this file.
+[paths]
+base_dir = ".."
+environment = ".env"
+samples = "artifacts/samples.json"
+statistics = "artifacts/workload_stats.json"
+recommendations = "artifacts/recommendations.json"
+report = "artifacts/cost-optimization-report.html"
+recommendation_prompt = "config/prompts/recommend_workloads.txt"
+
+[kubernetes]
+namespace = "cost-agent-demo"
+criticality_annotation = "cost-agent/criticality"
+config_mode = "auto"
+
+[prometheus]
+url = "http://localhost:9090"
+disable_ssl = true
+cpu_metric = "container_cpu_usage_seconds_total"
+memory_metric = "container_memory_working_set_bytes"
+cpu_rate_window = "5m"
+namespace_label = "namespace"
+pod_label = "pod"
+
+[sampling]
+# Forty waits between 41 samples gives a ten-minute observation window.
+count = 10
+interval_seconds = 5
+debug_prometheus = false
+
+[statistics]
+percentile_rank = 95.0
+trend_change_threshold = 0.15
+minimum_trend_samples = 4
+
+[guardrails]
+safety_margin = 1.10
+high_variance_ratio = 1.50
+recent_incident_hours = 24.0
+protected_criticalities = ["tier-0"]
+
+[gemini]
+api_key_environment_variable = "GEMINI_API_KEY"
+model = "gemini-3.6-flash"
+fallback_models = [
+  "gemini-3.5-flash",
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+]
+thinking_level = "minimal"
+thinking_model_prefixes = ["gemini-3"]
+max_rate_limit_retries = 3
+retry_delay_buffer_seconds = 0.5
+max_retry_delay_seconds = 60.0
+max_tool_rounds = 5
+max_output_tokens = 2048
+
+[report]
+title = "Kubernetes Cost Optimization Report"
+subtitle = "AI proposes resource requests; deterministic guardrails decide what is approved. This report is advisory and does not modify Kubernetes."
