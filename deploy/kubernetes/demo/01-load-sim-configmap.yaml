@@ -1,0 +1,69 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: load-sim-script
+  namespace: cost-agent-demo
+data:
+  load_sim.py: |
+    import os
+    import time
+
+    # ---- Config via env vars (set per-workload in the Deployment) ----
+    CPU_LOAD_PCT = float(os.environ.get("CPU_LOAD_PCT", "15"))          # baseline CPU load %
+    MEM_MB = int(os.environ.get("MEM_MB", "100"))                       # baseline memory held (MB)
+    BURST = os.environ.get("BURST", "false").lower() == "true"
+    BURST_CPU_LOAD_PCT = float(os.environ.get("BURST_CPU_LOAD_PCT", "70"))
+    BURST_INTERVAL_SEC = int(os.environ.get("BURST_INTERVAL_SEC", "300"))  # how often a burst starts
+    BURST_DURATION_SEC = int(os.environ.get("BURST_DURATION_SEC", "30"))  # how long a burst lasts
+    TRIGGER_OOM = os.environ.get("TRIGGER_OOM", "false").lower() == "true"
+    OOM_INTERVAL_SEC = int(os.environ.get("OOM_INTERVAL_SEC", "240"))   # how often to spike memory past the limit
+
+    CYCLE_SEC = 0.1  # duty-cycle window for CPU busy/sleep loop
+
+    def touch(block):
+        # actually commit the pages so RSS reflects the allocation, not just virtual size
+        for i in range(0, len(block), 4096):
+            block[i] = 1
+
+    def busy(load_pct, cycle_sec=CYCLE_SEC):
+        busy_time = cycle_sec * (load_pct / 100.0)
+        sleep_time = cycle_sec - busy_time
+        t0 = time.time()
+        while time.time() - t0 < busy_time:
+            pass
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+
+    print(
+        f"[load_sim] starting: cpu_baseline={CPU_LOAD_PCT}% mem={MEM_MB}MB "
+        f"burst={BURST} trigger_oom={TRIGGER_OOM}",
+        flush=True,
+    )
+
+    # hold a baseline memory allocation for the life of the process
+    baseline_mem = bytearray(MEM_MB * 1024 * 1024)
+    touch(baseline_mem)
+
+    start = time.time()
+    last_oom_attempt = start
+
+    while True:
+        now = time.time()
+        current_load = CPU_LOAD_PCT
+
+        if BURST:
+            phase = (now - start) % BURST_INTERVAL_SEC
+            if phase < BURST_DURATION_SEC:
+                current_load = BURST_CPU_LOAD_PCT
+
+        busy(current_load)
+
+        if TRIGGER_OOM and (now - last_oom_attempt) > OOM_INTERVAL_SEC:
+            print("[load_sim] simulating a memory spike (may exceed container limit)...", flush=True)
+            try:
+                spike = bytearray(500 * 1024 * 1024)  # 500MB spike
+                touch(spike)
+                time.sleep(5)
+            except MemoryError:
+                print("[load_sim] MemoryError raised in-process (limit hit before OS OOM-killed us)", flush=True)
+            last_oom_attempt = now

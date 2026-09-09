@@ -1,0 +1,18 @@
+Analyze all Kubernetes workloads in this list: $workload_names.
+For every workload, call get_workload_stats, get_incident_history, and
+get_criticality before deciding. These $tool_call_count read-only lookups are
+independent: issue all of their function calls together in your first response.
+Suggest smaller values only when the data supports it. CPU must be numeric cores;
+memory must be numeric bytes. Return exactly one entry per workload as JSON:
+{
+  "recommendations": [
+    {
+      "workload": "name",
+      "recommended_cpu": number,
+      "recommended_memory": number,
+      "confidence": "high" | "medium" | "low",
+      "reasoning": "string"
+    }
+  ]
+}
+The recommendations are advisory. Deterministic guardrails make every final decision.
