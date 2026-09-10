@@ -1,10 +1,12 @@
+"""Tests for CLI dispatch and concise operator-facing error messages."""
+
 import contextlib
 import io
 import unittest
 from unittest.mock import patch
 
 from k8s_cost_agent.cli import main
-from tests.unit.helpers import SETTINGS
+from tests.helpers import SETTINGS
 
 
 class CliTests(unittest.TestCase):

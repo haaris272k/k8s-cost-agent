@@ -1,15 +1,17 @@
+"""Tests for safe report data preparation and standalone HTML rendering."""
+
 import unittest
 from datetime import datetime, timezone
 
 from k8s_cost_agent.reporting.html import build_report_rows, render_html
-from tests.unit.helpers import SETTINGS
+from tests.helpers import SETTINGS
 
 
 GIBIBYTE = 1024**3
 
 
 def stats_record(name, criticality="tier-2"):
-    """Build one minimal Phase 3 record for report tests."""
+    """Build one minimal statistics record for report tests."""
     return {
         "name": name,
         "namespace": "cost-agent-demo",
@@ -30,7 +32,7 @@ def recommendation_record(
     memory_approved=True,
     reasoning="Stable usage supports a smaller request.",
 ):
-    """Build one minimal guarded Phase 5 result for report tests."""
+    """Build one minimal guarded recommendation for report tests."""
     return {
         "workload": name,
         "recommendation": {

@@ -23,7 +23,8 @@ namespace_label = "namespace"
 pod_label = "pod"
 
 [sampling]
-# Forty waits between 41 samples gives a ten-minute observation window.
+# Quick check: nine waits between 10 samples total 45 seconds.
+# For a ten-minute observation window, use count = 41 and interval_seconds = 15.
 count = 10
 interval_seconds = 5
 debug_prometheus = false

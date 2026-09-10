@@ -1,7 +1,10 @@
-"""Generate the Phase 6 self-contained HTML recommendation report.
+"""Turn guarded recommendations into a portable HTML report.
 
-The report is presentation only. It reads Phase 3 statistics and guarded
-Phase 5 recommendations, and never connects to or modifies Kubernetes.
+The report is presentation only. It reads workload statistics and guarded
+recommendations, and never connects to or modifies Kubernetes.
+
+The renderer treats saved JSON as untrusted input: numeric fields are checked,
+model text is HTML-escaped, and savings use only guardrail-approved values.
 """
 
 import html
@@ -16,6 +19,8 @@ def _index_records(
     records: list[dict[str, Any]], key: str, label: str
 ) -> dict[str, dict[str, Any]]:
     """Index records by a required unique string field."""
+    # Duplicate names would make the join ambiguous, so fail instead of silently
+    # replacing one record with another.
     indexed = {}
     for record in records:
         name = record.get(key)
@@ -72,7 +77,7 @@ def build_report_rows(
     stats_records: list[dict[str, Any]],
     recommendation_records: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Join Phase 3 and Phase 5 data and sort by approved savings potential."""
+    """Join statistics and recommendations, sorting by approved savings."""
     stats_by_name = _index_records(stats_records, "name", "stats")
     recommendations_by_name = _index_records(
         recommendation_records, "workload", "recommendation"
@@ -109,6 +114,8 @@ def build_report_rows(
         )
         cpu_approved = cpu_decision.get("approved") is True
         memory_approved = memory_decision.get("approved") is True
+        # A rejected decision always displays the current request. This second
+        # enforcement protects the report even if saved JSON was manually edited.
         approved_cpu = decision_cpu if cpu_approved else current_cpu
         approved_memory = decision_memory if memory_approved else current_memory
         if approved_cpu > current_cpu or approved_memory > current_memory:
@@ -161,14 +168,18 @@ def build_report_rows(
             }
         )
 
+    # Show the largest approved opportunity first; names break equal-score ties
+    # so repeated renders have stable ordering.
     return sorted(rows, key=lambda row: (-row["savings_score"], row["name"]))
 
 
 def _format_cpu(value: float) -> str:
+    """Format a numeric CPU value as cores for human-readable output."""
     return f"{value:.3f} cores"
 
 
 def _format_memory(value: float) -> str:
+    """Format byte values with Kubernetes-friendly binary memory units."""
     gibibyte = 1024**3
     mebibyte = 1024**2
     if value >= gibibyte:
@@ -177,15 +188,19 @@ def _format_memory(value: float) -> str:
 
 
 def _format_percent(value: float) -> str:
+    """Format a percentage consistently throughout the report."""
     return f"{value:.1f}%"
 
 
 def _escape(value: Any) -> str:
+    """Escape provider and workload text before inserting it into HTML."""
     return html.escape(str(value), quote=True)
 
 
 def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Calculate portfolio-level totals from approved values."""
+    # Aggregate raw values before calculating percentages; averaging individual
+    # percentages would give tiny and large workloads equal weight.
     current_cpu = sum(row["current_cpu"] for row in rows)
     approved_cpu = sum(row["approved_cpu"] for row in rows)
     current_memory = sum(row["current_memory"] for row in rows)
@@ -211,6 +226,8 @@ def render_html(
         "%Y-%m-%d %H:%M UTC"
     )
 
+    # The summary table gives a quick scan. Detail cards retain the proposal,
+    # deterministic reasons, and tool trace needed to explain each result.
     table_rows = []
     detail_cards = []
     for row in rows:

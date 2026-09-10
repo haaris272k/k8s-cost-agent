@@ -1,8 +1,10 @@
+"""Tests for configurable PromQL query construction."""
+
 import unittest
 from dataclasses import replace
 
 from k8s_cost_agent.collection.metrics import _promql_queries
-from tests.unit.helpers import SETTINGS
+from tests.helpers import SETTINGS
 
 
 class MetricsTests(unittest.TestCase):

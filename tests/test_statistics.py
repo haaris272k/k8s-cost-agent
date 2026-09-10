@@ -1,8 +1,10 @@
+"""Tests for workload averages, percentiles, variance, and trends."""
+
 import unittest
 from dataclasses import replace
 
 from k8s_cost_agent.analysis.statistics import summarize_workload, trend
-from tests.unit.helpers import SETTINGS
+from tests.helpers import SETTINGS
 
 
 def samples(cpu_values, memory_values=None):

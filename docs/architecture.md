@@ -51,8 +51,21 @@ Configured paths default to:
 3. `artifacts/recommendations.json` — raw proposals, decisions, model, and trace.
 4. `artifacts/cost-optimization-report.html` — portable presentation output.
 
-The stage files provide useful restart points. For example, `report` can be
-rerun without contacting the cluster or Gemini.
+These files are generated locally and ignored by Git. The pipeline creates
+their parent directory automatically, so a fresh checkout needs no artifacts.
+Keep existing local results to resume a stage without repeating earlier work;
+for example, `report` can be rerun without contacting the cluster or Gemini.
+
+## Repository navigation
+
+- `config/` contains the runtime settings and external prompt.
+- `demo/` contains optional sample workloads, not a deployment of the agent.
+- `src/k8s_cost_agent/` contains the application layers described above.
+- `tests/` contains offline unit tests with in-code fixtures.
+- `docs/` contains architecture and configuration details for deeper reading.
+
+Python installers generate `*.egg-info/` metadata. It is ignored alongside
+build output and caches; `pyproject.toml` remains the packaging source of truth.
 
 ## Safety properties
 

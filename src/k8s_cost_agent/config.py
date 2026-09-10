@@ -1,4 +1,10 @@
-"""Load and validate all environment-specific application settings."""
+"""Turn the TOML configuration file into validated Python settings.
+
+The rest of the application receives one :class:`Settings` object instead of
+reading files or environment variables itself. This keeps configuration logic
+in one place and makes every pipeline stage easier to test. Non-secret options
+come from TOML; the Gemini API key is read separately from the environment.
+"""
 
 from __future__ import annotations
 
@@ -19,7 +25,11 @@ KUBERNETES_CONFIG_MODES = ("auto", "kubeconfig", "in_cluster")
 
 @dataclass(frozen=True)
 class PathSettings:
-    """Resolved input, output, prompt, and environment file locations."""
+    """Absolute paths used for local inputs and generated outputs.
+
+    Relative paths in TOML are resolved before this object is created, so
+    callers never need to guess which directory a path is relative to.
+    """
 
     base_dir: Path
     environment: Path
@@ -32,6 +42,8 @@ class PathSettings:
 
 @dataclass(frozen=True)
 class KubernetesSettings:
+    """Where to find workloads and how to authenticate to Kubernetes."""
+
     namespace: str
     criticality_annotation: str
     config_mode: str
@@ -39,6 +51,8 @@ class KubernetesSettings:
 
 @dataclass(frozen=True)
 class PrometheusSettings:
+    """Connection details and metric names used to build PromQL queries."""
+
     url: str
     disable_ssl: bool
     cpu_metric: str
@@ -50,6 +64,8 @@ class PrometheusSettings:
 
 @dataclass(frozen=True)
 class SamplingSettings:
+    """How many metric snapshots to collect and how far apart to collect them."""
+
     count: int
     interval_seconds: float
     debug_prometheus: bool
@@ -57,6 +73,8 @@ class SamplingSettings:
 
 @dataclass(frozen=True)
 class StatisticsSettings:
+    """Thresholds used for percentiles, variance, and trend calculations."""
+
     percentile_rank: float
     trend_change_threshold: float
     minimum_trend_samples: int
@@ -64,6 +82,8 @@ class StatisticsSettings:
 
 @dataclass(frozen=True)
 class GuardrailSettings:
+    """Deterministic safety policy applied after the LLM makes a proposal."""
+
     safety_margin: float
     high_variance_ratio: float
     recent_incident_hours: float
@@ -72,6 +92,8 @@ class GuardrailSettings:
 
 @dataclass(frozen=True)
 class GeminiSettings:
+    """Gemini model selection, response limits, and bounded retry behavior."""
+
     api_key_environment_variable: str
     model: str
     fallback_models: tuple[str, ...]
@@ -86,13 +108,20 @@ class GeminiSettings:
 
 @dataclass(frozen=True)
 class ReportSettings:
+    """User-facing text displayed at the top of the HTML report."""
+
     title: str
     subtitle: str
 
 
 @dataclass(frozen=True)
 class Settings:
-    """Complete validated configuration used by every pipeline stage."""
+    """Complete immutable configuration shared by every pipeline stage.
+
+    Grouping related values into smaller dataclasses makes call sites explicit:
+    for example, the collector receives Kubernetes and Prometheus settings,
+    while the guardrail receives only its deterministic policy.
+    """
 
     source: Path
     paths: PathSettings
@@ -106,6 +135,7 @@ class Settings:
 
 
 def _table(document: Mapping[str, Any], name: str) -> Mapping[str, Any]:
+    """Return one required TOML table with a clear error if it is absent."""
     value = document.get(name)
     if not isinstance(value, dict):
         raise ValueError(f"Missing configuration table: [{name}]")
@@ -115,6 +145,11 @@ def _table(document: Mapping[str, Any], name: str) -> Mapping[str, Any]:
 def _value(
     table: Mapping[str, Any], table_name: str, key: str, expected_type: type
 ) -> Any:
+    """Read one required value and verify its basic Python type.
+
+    Python treats ``bool`` as a subtype of ``int``. The explicit boolean check
+    prevents values such as ``true`` from being accepted for numeric settings.
+    """
     if key not in table:
         raise ValueError(f"Missing configuration value: {table_name}.{key}")
     value = table[key]
@@ -136,6 +171,7 @@ def _string_tuple(
     key: str,
     allow_empty: bool = False,
 ) -> tuple[str, ...]:
+    """Read a TOML string array and expose it as an immutable tuple."""
     value = table.get(key)
     if not isinstance(value, list) or (not value and not allow_empty):
         qualifier = "a string list" if allow_empty else "a non-empty string list"
@@ -146,17 +182,34 @@ def _string_tuple(
 
 
 def _resolved_path(base_dir: Path, value: str) -> Path:
+    """Resolve a configured path against the configured project base directory."""
     path = Path(value).expanduser()
     return path.resolve() if path.is_absolute() else (base_dir / path).resolve()
 
 
 def _validate_identifier(value: str, label: str) -> None:
+    """Reject metric or label names that cannot be Prometheus identifiers."""
     if not re.fullmatch(r"[a-zA-Z_:][a-zA-Z0-9_:]*", value):
         raise ValueError(f"{label} is not a valid Prometheus identifier")
 
 
 def load_settings(path: str | Path = DEFAULT_CONFIG_PATH) -> Settings:
-    """Load a TOML file, resolve its paths, and fail early on invalid values."""
+    """Load, normalize, and validate all application settings.
+
+    Validation happens before a pipeline stage contacts Kubernetes,
+    Prometheus, or Gemini. A bad setting therefore fails quickly with the name
+    of the offending TOML key.
+
+    Args:
+        path: TOML file to load. Relative paths use the current working
+            directory, which is normally the repository root.
+
+    Returns:
+        A fully resolved, immutable :class:`Settings` object.
+
+    Raises:
+        ValueError: If the file is missing, malformed, incomplete, or unsafe.
+    """
     source = Path(path).expanduser().resolve()
     try:
         with source.open("rb") as config_file:
@@ -166,6 +219,8 @@ def load_settings(path: str | Path = DEFAULT_CONFIG_PATH) -> Settings:
     except tomllib.TOMLDecodeError as error:
         raise ValueError(f"Invalid TOML configuration in {source}: {error}") from error
 
+    # Resolve paths first because the dotenv file and external prompt both
+    # depend on them. ``base_dir`` itself is relative to the TOML file.
     paths_data = _table(document, "paths")
     configured_base = _value(paths_data, "paths", "base_dir", str)
     base_dir = _resolved_path(source.parent, configured_base)
@@ -191,8 +246,11 @@ def load_settings(path: str | Path = DEFAULT_CONFIG_PATH) -> Settings:
             _value(paths_data, "paths", "recommendation_prompt", str),
         ),
     )
+    # Keep a shell-exported value when both sources define it. This allows CI
+    # or an operator's shell to override local development defaults safely.
     load_dotenv(paths.environment, override=False)
 
+    # Connection settings describe read-only data sources used by collection.
     kubernetes_data = _table(document, "kubernetes")
     kubernetes = KubernetesSettings(
         namespace=_value(kubernetes_data, "kubernetes", "namespace", str),
@@ -240,6 +298,8 @@ def load_settings(path: str | Path = DEFAULT_CONFIG_PATH) -> Settings:
             "prometheus.cpu_rate_window must be one Prometheus duration"
         )
 
+    # Sampling and statistics determine the evidence supplied to the LLM and
+    # guardrails. Bounds below prevent meaningless windows and thresholds.
     sampling_data = _table(document, "sampling")
     sampling = SamplingSettings(
         count=_value(sampling_data, "sampling", "count", int),
@@ -274,6 +334,8 @@ def load_settings(path: str | Path = DEFAULT_CONFIG_PATH) -> Settings:
     if statistics.minimum_trend_samples < 2:
         raise ValueError("statistics.minimum_trend_samples must be at least 2")
 
+    # Safety policy and provider behavior are kept separate: Gemini proposes a
+    # value, while guardrail settings determine whether code approves it.
     guardrail_data = _table(document, "guardrails")
     guardrails = GuardrailSettings(
         safety_margin=_value(
@@ -360,6 +422,8 @@ def load_settings(path: str | Path = DEFAULT_CONFIG_PATH) -> Settings:
         subtitle=_value(report_data, "report", "subtitle", str),
     )
 
+    # Cross-field checks run after individual values have been parsed. The
+    # output files must be distinct so one stage cannot overwrite another.
     if not paths.recommendation_prompt.is_file():
         raise ValueError(
             "Recommendation prompt file does not exist: "
@@ -390,7 +454,12 @@ def load_settings(path: str | Path = DEFAULT_CONFIG_PATH) -> Settings:
 def read_api_key(
     settings: Settings, environment: Mapping[str, str] | None = None
 ) -> str:
-    """Read the configured secret without logging or returning its source file."""
+    """Read the configured Gemini secret from environment variables.
+
+    The function returns only the stripped value and never logs it. Supplying
+    ``environment`` is useful in tests because it avoids reading the real
+    process environment.
+    """
     values = environment if environment is not None else os.environ
     variable = settings.gemini.api_key_environment_variable
     api_key = values.get(variable, "").strip()

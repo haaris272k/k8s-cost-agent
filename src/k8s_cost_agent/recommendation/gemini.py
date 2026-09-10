@@ -1,8 +1,12 @@
-"""Gemini recommendation agent for Phase 5.
+"""Ask Gemini for proposals, then submit them to deterministic guardrails.
 
-Gemini may inspect Phase 3 data through three read-only tools and propose CPU
-and memory values. Every proposal is then passed through Phase 4 guardrails.
+Gemini may inspect workload statistics through three read-only tools and propose
+CPU and memory values. Every proposal passes through deterministic guardrails.
 The model never writes to Kubernetes and never has the final say.
+
+The interaction has four steps: Gemini requests workload data, local tool
+functions return it, Gemini emits structured JSON, and Python validates both
+resource values. Tool results and decisions are saved for explainability.
 """
 
 import json
@@ -15,6 +19,8 @@ from typing import Any, Callable
 from k8s_cost_agent.analysis.guardrails import validate_recommendation
 from k8s_cost_agent.config import GeminiSettings, GuardrailSettings
 
+# The SDK uses this JSON Schema to constrain the model's final response. Python
+# still parses and validates the result because model output is untrusted input.
 RECOMMENDATION_FIELDS = {
     "recommended_cpu": {"type": "number"},
     "recommended_memory": {"type": "number"},
@@ -48,7 +54,11 @@ BATCH_RECOMMENDATION_SCHEMA = {
 
 @dataclass
 class ToolTrace:
-    """One read-only tool call made while analyzing a workload."""
+    """One recorded data lookup made by Gemini.
+
+    A trace includes the tool name, its arguments, and returned data so the
+    final recommendation can show what evidence the model requested.
+    """
 
     name: str
     arguments: dict[str, Any]
@@ -64,9 +74,12 @@ class ToolTrace:
 
 
 class WorkloadTools:
-    """Read-only tool implementations backed by Phase 3 JSON data."""
+    """Read-only tool implementations backed by workload statistics."""
 
     def __init__(self, workload_stats: list[dict[str, Any]]):
+        """Index workload records and start an empty explainability trace."""
+        # Index once for fast, unambiguous lookups by Deployment name. Trace
+        # entries are appended in the same order that Gemini requests them.
         self.workload_by_name = {
             workload["name"]: workload for workload in workload_stats
         }
@@ -80,7 +93,7 @@ class WorkloadTools:
             raise ValueError(f"Unknown workload: {name}") from error
 
     def get_workload_stats(self, name: str) -> dict[str, Any]:
-        """Return the complete Phase 3 stats record for one workload."""
+        """Return the complete statistics record for one workload."""
         result = self._get_workload(name)
         self.trace.append(ToolTrace("get_workload_stats", {"name": name}, result))
         return result
@@ -117,7 +130,7 @@ class Recommendation:
     model_name: str
 
     def as_dict(self) -> dict[str, Any]:
-        """Return the complete Phase 5 result as JSON-compatible data."""
+        """Return the guarded recommendation as JSON-compatible data."""
         return {
             "workload": self.workload,
             "recommendation": self.recommendation,
@@ -138,6 +151,8 @@ def _tool_functions(tools: WorkloadTools) -> list[Callable[..., Any]]:
 def _parse_recommendation(text: str) -> dict[str, Any]:
     """Parse and validate the model's structured JSON recommendation."""
     text = text.strip()
+    # Structured responses should be raw JSON, but accepting a surrounding
+    # Markdown fence makes the parser resilient to common model formatting.
     if text.startswith("```") and text.endswith("```"):
         text = text[3:-3].strip()
         if text.startswith("json"):
@@ -185,6 +200,7 @@ def _parse_batch_recommendations(
     if not isinstance(records, list):
         raise ValueError("Gemini batch response must contain a recommendations list")
 
+    # Index by workload instead of trusting the model's array order.
     by_name = {}
     for record in records:
         if not isinstance(record, dict) or not isinstance(record.get("workload"), str):
@@ -199,6 +215,8 @@ def _parse_batch_recommendations(
         }
         by_name[name] = _parse_recommendation(json.dumps(proposal))
 
+    # Require an exact match so no workload is silently skipped and no
+    # unexpected recommendation enters the deterministic validation stage.
     expected = set(workload_names)
     actual = set(by_name)
     if actual != expected:
@@ -215,6 +233,8 @@ def _prompt_for_workloads(
     workload_names: list[str], prompt_template: str
 ) -> str:
     """Create one quota-efficient prompt for every workload."""
+    # Each workload must trigger all three read-only tools; stating the expected
+    # count makes the requirement explicit in the external prompt.
     return Template(prompt_template).substitute(
         workload_names=json.dumps(workload_names),
         tool_call_count=len(workload_names) * 3,
@@ -227,6 +247,8 @@ def _function_response_part(types: Any, function_call: Any, result: Any) -> Any:
         name=function_call.name,
         response={"result": result},
     )
+    # Parallel tool calls need their identifiers copied onto responses so the
+    # provider can match every result to the corresponding request.
     call_id = getattr(function_call, "id", None)
     if call_id and getattr(part, "function_response", None):
         part.function_response.id = call_id
@@ -242,6 +264,8 @@ def _rate_limit_retry_delay(
     if status_code != 429 and "resource_exhausted" not in message.lower():
         return None
 
+    # Retry only when the provider supplies a duration. Guessing a delay could
+    # turn a quota failure into a long, unpredictable wait.
     delay_match = re.search(r"retry in ([0-9.]+)s", message, re.IGNORECASE)
     if not delay_match:
         delay_match = re.search(
@@ -295,7 +319,11 @@ def _generate_content_with_retry(
 
 
 def _response_parts(response: Any) -> list[Any]:
-    """Read candidate parts directly without triggering SDK text warnings."""
+    """Read candidate parts directly without triggering SDK text warnings.
+
+    ``response.text`` is convenient for text-only replies, but the SDK warns
+    when a response contains function calls. Reading parts works for both.
+    """
     candidates = getattr(response, "candidates", None) or []
     if not candidates:
         return []
@@ -315,6 +343,8 @@ def _model_response(
     types = model["types"]
     contents: Any = prompt
 
+    # One round may request tools; a later round should return final JSON. The
+    # configured maximum prevents a malformed conversation from looping forever.
     for _ in range(settings.max_tool_rounds):
         config = types.GenerateContentConfig(
             tools=[model["tool"]],
@@ -333,6 +363,7 @@ def _model_response(
             if getattr(part, "function_call", None)
         ]
         if not function_calls:
+            # No tool calls means this round should contain the final JSON text.
             if parts:
                 text = "".join(
                     part.text for part in parts if getattr(part, "text", None)
@@ -353,6 +384,8 @@ def _model_response(
                 "sending their results..."
             )
 
+        # Execute only methods exposed by WorkloadTools. These methods read the
+        # in-memory statistics and have no Kubernetes or filesystem write path.
         function_response_parts = []
         for function_call in function_calls:
             function = getattr(tools, function_call.name)
@@ -365,6 +398,8 @@ def _model_response(
             if isinstance(contents, str)
             else list(contents)
         )
+        # Send the original prompt, Gemini's tool requests, and local responses
+        # back as one conversation so the model retains the full context.
         contents = [
             *history,
             response.candidates[0].content,
@@ -433,6 +468,8 @@ def recommend_workloads(
     )
     proposals = _parse_batch_recommendations(raw_response, workload_names)
 
+    # The response schema validates output shape; this separate check validates
+    # that Gemini gathered every required category of evidence first.
     required_tools = {
         "get_workload_stats",
         "get_incident_history",
@@ -458,6 +495,8 @@ def recommend_workloads(
             for entry in tools.trace
             if entry.arguments.get("name") == name
         ]
+        # CPU and memory are validated independently. One resource may be safe
+        # to shrink even when the other must remain unchanged.
         results.append(
             Recommendation(
                 name,
@@ -492,6 +531,8 @@ def create_model(
     from google.genai import types
 
     client = genai.Client(api_key=api_key)
+    # Explicit declarations restrict Gemini to the three local, read-only
+    # functions below instead of giving it any Kubernetes client capability.
     declarations = []
     for function in _tool_functions(tools):
         declarations.append(
@@ -559,6 +600,8 @@ def _recommend_batch_with_fallback(
                 status_callback,
             )
         except Exception as error:
+            # Fallbacks address model availability only. Authentication, quota,
+            # and invalid responses must remain visible to the caller.
             if not _is_model_availability_error(error):
                 raise
             last_model_error = error

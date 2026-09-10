@@ -1,4 +1,8 @@
-"""Small JSON and text persistence helpers shared by pipeline stages."""
+"""Read and write the local artifacts exchanged by pipeline stages.
+
+Keeping file handling here gives every stage the same UTF-8 encoding, JSON
+formatting, directory creation, and error messages.
+"""
 
 import json
 from pathlib import Path
@@ -6,7 +10,7 @@ from typing import Any
 
 
 def read_json(path: Path, label: str) -> Any:
-    """Read JSON and give malformed inputs a path-specific error."""
+    """Read JSON and give missing or malformed inputs a path-specific error."""
     try:
         with path.open(encoding="utf-8") as input_file:
             return json.load(input_file)
@@ -17,7 +21,7 @@ def read_json(path: Path, label: str) -> Any:
 
 
 def read_json_list(path: Path, label: str) -> list[Any]:
-    """Read a top-level JSON list."""
+    """Read JSON and require the top-level value to be a list."""
     records = read_json(path, label)
     if not isinstance(records, list):
         raise ValueError(f"{label} must contain a JSON list: {path}")
@@ -26,6 +30,8 @@ def read_json_list(path: Path, label: str) -> list[Any]:
 
 def write_json(path: Path, value: Any) -> None:
     """Write stable, human-readable JSON and create its parent directory."""
+    # A fresh checkout has no artifacts directory because generated outputs are
+    # ignored by Git. Create it on first use.
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as output_file:
         json.dump(value, output_file, indent=2)
@@ -33,6 +39,6 @@ def write_json(path: Path, value: Any) -> None:
 
 
 def write_text(path: Path, value: str) -> None:
-    """Write UTF-8 text and create its parent directory."""
+    """Write UTF-8 text and create its parent directory when needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(value, encoding="utf-8")

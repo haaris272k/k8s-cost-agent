@@ -1,11 +1,14 @@
-"""Deterministic safety checks for Phase 3 workload recommendations.
+"""Deterministic safety checks for workload recommendations.
 
 This module is intentionally independent of Kubernetes, Prometheus, and any
-LLM. It receives a Phase 3 workload dictionary plus one proposed resource
+LLM. It receives a workload statistics dictionary plus one proposed resource
 value, then decides whether that proposal is safe to approve.
 
-The LLM is not part of this decision. A future LLM may suggest a value, but
-this module remains the final authority for Phase 4.
+The LLM proposes values; this module remains the final approval authority.
+
+Every rejection returns the existing request as ``approved_value``. A caller
+that accidentally uses this field can therefore never apply the rejected LLM
+value.
 """
 
 from datetime import datetime, timezone
@@ -46,6 +49,7 @@ def _parse_quantity(value: str | int | float, resource: str) -> float:
     if resource not in units:
         raise ValueError(f"Unsupported resource: {resource}")
 
+    # Try longer suffixes first so ``Mi`` is not mistaken for a shorter match.
     for suffix, multiplier in sorted(
         units[resource].items(), key=lambda item: -len(item[0])
     ):
@@ -68,6 +72,8 @@ def _parse_timestamp(value: Any) -> datetime | None:
         timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
     else:
         raise ValueError(f"Invalid incident timestamp: {value!r}")
+    # Kubernetes timestamps are normally timezone-aware. Treat a naive value as
+    # UTC so comparisons remain deterministic rather than using local time.
     if timestamp.tzinfo is None:
         return timestamp.replace(tzinfo=timezone.utc)
     return timestamp.astimezone(timezone.utc)
@@ -80,7 +86,7 @@ def _has_recent_incident(
 ) -> bool:
     """Return whether a restart or OOMKill falls inside the safety window.
 
-    Phase 2 currently exposes counts and the latest OOM flag, but not always a
+    The collector exposes counts and the latest OOM flag, but not always a
     timestamp. When an incident exists without a timestamp, this function
     fails closed and treats it as recent rather than approving blindly.
     """
@@ -106,13 +112,15 @@ def _is_high_variance(
     """Check whether the configured spread ratio marks usage as variable."""
     ratios = workload_stats.get("percentile_to_avg_ratio")
     if not isinstance(ratios, dict):
+        # Accept older saved artifacts so users can regenerate a report without
+        # recollecting metrics or spending another Gemini request.
         ratios = workload_stats.get("p95_to_avg_ratio", {})
     ratio = ratios.get(_usage_field(resource))
     return ratio is not None and float(ratio) >= settings.high_variance_ratio
 
 
 def _usage_field(resource: str) -> str:
-    """Return the Phase 3 usage field name for a resource."""
+    """Return the statistics usage field name for a resource."""
     return (
         "current_cpu_usage_cores"
         if resource == "cpu"
@@ -127,10 +135,10 @@ def validate_recommendation(
     settings: GuardrailSettings,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Validate one proposed CPU or memory value against Phase 4 guardrails.
+    """Validate one proposed CPU or memory value against the safety policy.
 
     Args:
-        workload_stats: One Phase 3 workload record.
+        workload_stats: One workload statistics record.
         resource: Either ``cpu`` or ``memory``.
         proposed_value: CPU in cores or memory in bytes. Kubernetes quantity
             strings such as ``500m`` and ``512Mi`` are also accepted.
@@ -155,6 +163,8 @@ def validate_recommendation(
     observed_percentile = float(
         percentiles.get(_usage_field(resource), 0.0)
     )
+    # The safety margin creates headroom above observed high usage. For example,
+    # a 1.10 margin places the minimum at 110% of the chosen percentile.
     minimum_safe_value = observed_percentile * settings.safety_margin
     confidence = (
         "low"
@@ -162,6 +172,8 @@ def validate_recommendation(
         else "normal"
     )
 
+    # Rule order is deliberate: organizational and incident protections take
+    # precedence, followed by the numeric safety floor and shrink-only policy.
     criticality = workload_stats.get("criticality")
     if criticality in settings.protected_criticalities:
         return {

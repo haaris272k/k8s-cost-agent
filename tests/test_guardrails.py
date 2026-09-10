@@ -1,9 +1,11 @@
+"""Tests for the deterministic rules that approve or reject proposals."""
+
 import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 from k8s_cost_agent.analysis.guardrails import validate_recommendation
-from tests.unit.helpers import SETTINGS
+from tests.helpers import SETTINGS
 
 
 NOW = datetime(2026, 9, 5, 12, 0, tzinfo=timezone.utc)

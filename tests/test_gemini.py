@@ -1,3 +1,5 @@
+"""Tests for Gemini parsing, tool calls, fallbacks, and guarded proposals."""
+
 import json
 import unittest
 from types import SimpleNamespace
@@ -17,7 +19,7 @@ from k8s_cost_agent.recommendation.gemini import (
     generate_recommendations,
     recommend_workloads,
 )
-from tests.unit.helpers import PROMPT_TEMPLATE, SETTINGS
+from tests.helpers import PROMPT_TEMPLATE, SETTINGS
 
 
 class FakeResponse:
@@ -35,7 +37,7 @@ class FakeResponse:
 
 
 def workload(name="demo-workload"):
-    """Return one safe Phase 3-shaped workload record."""
+    """Return one safe workload statistics record."""
     return {
         "name": name,
         "requested_cpu_cores": 0.4,

@@ -1,8 +1,11 @@
-"""Collect current Kubernetes workload metrics as JSON.
+"""Build one normalized metrics record for each Kubernetes Deployment.
 
 Kubernetes supplies workload configuration and incident information, while
 Prometheus supplies the current CPU and memory measurements. The collector is
 read-only and produces one JSON-compatible record per Deployment.
+
+Kubernetes quantity strings are converted at this boundary. Downstream code
+therefore always receives CPU as numeric cores and memory as numeric bytes.
 """
 
 import re
@@ -22,9 +25,9 @@ RESOURCE_NAMES = ("cpu", "memory")
 def load_kubernetes_config(mode: str) -> None:
     """Load Kubernetes credentials for local or in-cluster execution.
 
-    Local development uses the user's kubeconfig. When that file is not
-    available, the Kubernetes client attempts to use the service-account
-    credentials mounted in a pod.
+    ``kubeconfig`` is intended for local development, while ``in_cluster``
+    reads the service-account credentials mounted in a Kubernetes pod. In
+    ``auto`` mode the local file is tried first, then in-cluster credentials.
     """
     if mode == "kubeconfig":
         config.load_kube_config()
@@ -63,6 +66,8 @@ def _deployment_resources(deployment: Any) -> dict[str, float | None]:
     pods, while preserving ``None`` for an unspecified resource. CPU is
     returned in cores and memory is returned in bytes, matching Prometheus.
     """
+    # Collect strings first because a pod can contain several containers. The
+    # result represents the resources requested by one complete pod replica.
     values = {
         f"{kind}_{resource}": []
         for kind in ("request", "limit")
@@ -88,6 +93,8 @@ def _latest_restart_was_oomkilled(pods: list[Any]) -> bool:
     the newest event; older OOMKills must not be reported as the latest event
     when a newer termination had another reason.
     """
+    # A Deployment may temporarily have old and new pods during a rollout.
+    # Compare timestamps across every container rather than trusting list order.
     terminations: list[tuple[datetime, bool]] = []
     for pod in pods:
         for status in pod.status.container_statuses or []:
@@ -115,6 +122,8 @@ def _query_value(
     if debug:
         print(f"PROMQL: {query}", file=sys.stderr)
         print(f"PROMETHEUS RESPONSE: {results!r}", file=sys.stderr)
+    # Prometheus may return several time series even for a summed query. Adding
+    # them here gives one workload-level number and naturally maps no series to 0.
     return sum(float(result["value"][1]) for result in results)
 
 
@@ -124,6 +133,7 @@ def _label_selector(deployment: Any) -> str:
     The selector is derived from ``spec.selector.match_labels`` rather than
     from the Deployment name because Kubernetes ownership is label-based.
     """
+    # Kubernetes uses all matchLabels entries together (logical AND).
     return ",".join(
         f"{key}={value}"
         for key, value in deployment.spec.selector.match_labels.items()
@@ -189,6 +199,9 @@ def _workload_record(
         cpu_usage = _query_value(prometheus, cpu_query, debug_prometheus)
         memory_usage = _query_value(prometheus, memory_query, debug_prometheus)
 
+    # Resource requests come from the pod template; usage and incidents come
+    # from the currently selected pods. Keeping both in one record lets later
+    # stages compare requested capacity with observed use.
     resources = _deployment_resources(deployment)
     return {
         "name": deployment.metadata.name,
@@ -238,9 +251,12 @@ def collect_workloads(
     """
     workloads: list[dict[str, Any]] = []
     namespace = kubernetes_settings.namespace
+    # Sort Deployments so repeated runs produce stable JSON and readable diffs.
     deployments = apps_api.list_namespaced_deployment(namespace).items
 
     for deployment in sorted(deployments, key=lambda item: item.metadata.name):
+        # Query pods by the Deployment's selector. A name prefix would be
+        # unreliable during rollouts and for custom naming conventions.
         selector = _label_selector(deployment)
         pods = core_api.list_namespaced_pod(namespace, label_selector=selector).items
         debug_queries = debug_prometheus and not workloads

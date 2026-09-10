@@ -1,10 +1,12 @@
+"""Tests for TOML path resolution and secret lookup behavior."""
+
 import unittest
 from pathlib import Path
 
 from k8s_cost_agent.config import load_settings, read_api_key
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class ConfigTests(unittest.TestCase):

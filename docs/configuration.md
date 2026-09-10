@@ -55,16 +55,34 @@ unsafe policy values are also rejected—for example, a safety margin below
 
 ## Secrets
 
-Copy `.env.example` to `.env` and set the configured Gemini variable:
+For initial setup, copy [the template](../.env.example) to `.env` and set the
+configured Gemini variable. Preserve an existing `.env`:
 
 ```dotenv
-GEMINI_API_KEY=replace-with-a-valid-local-secret
+GEMINI_API_KEY=your-local-key
 ```
 
 `.env` and `key.txt` are ignored by Git. The loader does not override a value
 already exported by the shell, which makes CI/CD secret injection predictable.
 Never place credentials in TOML, command arguments, generated artifacts, or
-logs.
+logs. The application never reads `key.txt`.
+
+## Sampling duration
+
+The waits total `(sampling.count - 1) * sampling.interval_seconds`. Collection
+and provider requests add to the overall run time. The checked-in values
+(`10` samples, `5` seconds) give 45 seconds of waits for a quick check.
+
+For the demo's periodic CPU bursts, prefer a ten-minute observation window:
+
+```toml
+[sampling]
+count = 41
+interval_seconds = 15
+debug_prometheus = false
+```
+
+This changes the duration through configuration; no source changes are needed.
 
 ## Prompt template
 

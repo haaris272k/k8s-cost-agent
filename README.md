@@ -5,35 +5,36 @@ safety rule: **the LLM proposes; deterministic code decides**.
 
 The collector reads Kubernetes and Prometheus, the statistics layer summarizes
 usage, Gemini proposes smaller CPU and memory requests, deterministic guardrails
-approve or reject each proposal, and the reporting layer produces one portable
-HTML file. No command changes Kubernetes resources.
+approve or reject each proposal, and the reporting layer produces a portable
+HTML report. The pipeline does not modify Kubernetes resources.
 
-## Project layout
+## Start here
 
-```text
-config/
-  settings.toml                    Non-secret application configuration
-  prompts/recommend_workloads.txt  Versioned Gemini prompt
-deploy/kubernetes/demo/            Demo workload manifests
-src/k8s_cost_agent/
-  collection/                      Kubernetes, Prometheus, and sampling
-  analysis/                        Statistics and deterministic guardrails
-  recommendation/                  Gemini tools and proposals
-  reporting/                       Self-contained HTML rendering
-  config.py                        Typed TOML configuration loader
-  pipeline.py                      Stage orchestration
-  cli.py                           Unified command-line interface
-artifacts/                         Generated JSON and HTML, ignored by Git
-tests/unit/                        Offline unit tests mirroring the package
-pyproject.toml                     Package metadata, dependencies, CLI entrypoint
-```
+To run the project, follow the setup below, edit
+[config/settings.toml](config/settings.toml), provide your Gemini key, then run
+`k8s-cost-agent run`. Open `artifacts/cost-optimization-report.html` when it
+finishes.
 
-See [architecture](docs/architecture.md) for the data flow and
-[configuration](docs/configuration.md) for every supported setting.
+| What you need | Where to look |
+| --- | --- |
+| Change the namespace, endpoints, sampling, or policy | [config/settings.toml](config/settings.toml) |
+| Provide credentials | Local `.env`, copied from [.env.example](.env.example), or an exported environment variable |
+| Inspect results | Local `artifacts/` directory, created by the pipeline |
+| Try demonstration workloads | Optional [demo/](demo/) manifests |
+| Understand or change the implementation | [src/k8s_cost_agent/](src/k8s_cost_agent/), [tests/](tests/), and [architecture](docs/architecture.md) |
 
 ## Setup
 
-Python 3.11 or newer is required:
+Prerequisites:
+
+- Python 3.11 or newer.
+- A running Kubernetes cluster and a configured kubeconfig.
+- Prometheus collecting the cluster's CPU and memory metrics.
+- A valid Gemini API key with model access and available quota.
+- `kubectl` for the local port-forward and optional demo setup.
+
+Run all commands from the repository root. The local example assumes minikube
+with the Docker driver and an existing Prometheus installation.
 
 ```bash
 python3.11 -m venv .venv
@@ -42,36 +43,58 @@ python -m pip install --editable .
 cp .env.example .env
 ```
 
-Add a valid Gemini API key to `.env`. The file is ignored by Git and must never
-be printed or committed.
+Copy the template only when creating your local `.env`; keep an existing file.
+Set `GEMINI_API_KEY` there. The file is ignored by Git and must never be printed
+or committed. An already exported value takes precedence over `.env`.
 
-Prometheus must be reachable at the URL configured in `config/settings.toml`.
-For the included minikube setup, run this in a separate terminal:
+Edit `config/settings.toml` for your namespace and Prometheus endpoint. The
+included settings use namespace `cost-agent-demo` and
+`http://localhost:9090`. For the existing minikube Prometheus installation,
+keep this running in a separate terminal:
 
 ```bash
 kubectl port-forward -n monitoring \
   svc/kube-prometheus-kube-prome-prometheus 9090:9090
 ```
 
+### Optional demo workloads
+
+The files in `demo/` create example workloads in `cost-agent-demo`; they are
+not an agent service deployment. To create or update these demonstration
+resources in your selected cluster:
+
+```bash
+kubectl apply -f demo/
+```
+
+Skip this if you already have workloads to analyze, and set
+`kubernetes.namespace` to their namespace. The demo includes steady workloads,
+`spiky-worker` with periodic CPU bursts, and `payment-service` with deliberate
+OOMKills to demonstrate the guardrails.
+
 ## Run end to end
 
-Validate local configuration without contacting Kubernetes, Prometheus, or
-Gemini:
+Validate configuration without contacting Kubernetes, Prometheus, or Gemini,
+then run the complete pipeline:
 
 ```bash
 k8s-cost-agent check-config
-```
-
-Run the complete read-only pipeline with one command:
-
-```bash
 k8s-cost-agent run
 ```
 
-The default ten-minute sampling window is intentional so periodic workload
-spikes have a reasonable chance of appearing. Progress is printed after every
-sample and pipeline stage. On success, open
-`artifacts/cost-optimization-report.html`.
+The same commands are available through `python -m k8s_cost_agent`.
+
+The checked-in sampling settings use 10 samples with a 5-second interval:
+nine waits total approximately 45 seconds, plus collection and recommendation
+time. This is a quick check and can miss periodic spikes. For the demo's
+five-minute burst cycle, use at least a five-minute observation window,
+preferably ten minutes: set `sampling.count = 41` and
+`sampling.interval_seconds = 15`.
+
+Progress is printed after each sample and stage. On success, open
+`artifacts/cost-optimization-report.html`. All JSON and HTML outputs stay local
+and are ignored by Git. They are created automatically; no example output files
+are required before the first run.
 
 To use another configuration file, put the global option before the command:
 
@@ -81,8 +104,7 @@ k8s-cost-agent --config config/settings.toml run
 
 ## Run one stage
 
-The same executable exposes stage commands for diagnosis or resuming from an
-existing artifact:
+Stage commands support diagnosis or reuse of existing local artifacts:
 
 ```bash
 k8s-cost-agent collect
@@ -91,47 +113,59 @@ k8s-cost-agent recommend
 k8s-cost-agent report
 ```
 
-Each stage reads its inputs and output paths from the same TOML file:
+| Command | Reads | Writes |
+| --- | --- | --- |
+| `collect` | Kubernetes and Prometheus | `artifacts/samples.json` |
+| `analyze` | Saved samples | `artifacts/workload_stats.json` |
+| `recommend` | Saved statistics and Gemini | `artifacts/recommendations.json` |
+| `report` | Saved statistics and recommendations | `artifacts/cost-optimization-report.html` |
 
-```text
-collect -> samples.json -> analyze -> workload_stats.json
-        -> recommend -> recommendations.json -> report -> HTML
-```
+Paths come from the TOML file. Keep your local artifacts if you want to resume
+at a later stage; deleting them requires regenerating the relevant inputs.
 
 Gemini normally handles all workloads in one conversation: one request for
 parallel read-only tool calls and one for the final structured proposals. Every
-CPU and memory proposal still passes independently through deterministic
-guardrails before it appears as approved.
+CPU and memory proposal passes independently through deterministic guardrails.
 
-## Configuration and secrets
+## Configuration
 
-All adjustable non-secret values are in `config/settings.toml`, including:
+`config/settings.toml` contains runtime configuration.
+`pyproject.toml` defines Python dependencies, packaging, and the command entry
+point. See the [configuration reference](docs/configuration.md) for supported
+settings.
 
-- artifact and prompt paths;
-- Kubernetes namespace, criticality annotation, and authentication mode;
-- Prometheus URL, metric names, labels, SSL behavior, and CPU rate window;
-- sample count, interval, and query diagnostics;
-- percentile, trend threshold, and minimum trend samples;
-- safety margin, incident window, variance threshold, and protected tiers;
-- Gemini model candidates, thinking, retries, tool rounds, and output limit;
-- report title and description.
-
-Only secret values belong in `.env`. The TOML file specifies the environment
-variable name from which the Gemini credential is read. Shell-exported values
-take precedence over `.env` values.
-
+The prompt is versioned separately in
+[config/prompts/recommend_workloads.txt](config/prompts/recommend_workloads.txt).
 CPU values remain numeric cores and memory values remain numeric bytes in every
 generated JSON artifact.
 
-## Validation
+## Project layout
+
+```text
+README.md                  Setup and normal usage
+.env.example               Credential template with no real key
+pyproject.toml             Python packaging and dependencies
+config/                    Runtime settings and recommendation prompt
+demo/                      Optional Kubernetes demonstration workloads
+src/k8s_cost_agent/         Application implementation
+tests/                     Offline unit tests
+docs/                      Architecture and configuration references
+artifacts/                 Generated local results, ignored by Git
+```
+
+The source package follows the processing flow: `collection/`, `analysis/`,
+`recommendation/`, and `reporting/`. Shared modules handle configuration,
+orchestration, file operations, and the CLI.
+
+## Developer validation
 
 ```bash
-python -m unittest discover -s tests/unit -v
-python -m compileall -q src tests/unit
+python -m unittest discover -s tests -v
+python -m compileall -q src tests
 k8s-cost-agent --help
 k8s-cost-agent check-config
 ```
 
-Unit tests and configuration validation require no live services. Full
-collection requires Kubernetes access and Prometheus; recommendation additionally
-requires a valid Gemini key, provider access, and available quota.
+Tests use in-code fixtures and mocked provider calls; they need no saved
+artifacts or live services. Full collection requires Kubernetes and Prometheus;
+recommendation additionally requires Gemini access.

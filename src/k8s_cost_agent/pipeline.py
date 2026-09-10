@@ -1,4 +1,9 @@
-"""Stage orchestration for the read-only cost optimization pipeline."""
+"""Connect the independent pipeline stages and persist their outputs.
+
+Each stage has one input and one output boundary, which makes it possible to
+run the complete flow or resume from a saved artifact. This module coordinates
+the work; calculation and safety decisions remain in their owning modules.
+"""
 
 from pathlib import Path
 from typing import Any, Callable
@@ -18,7 +23,7 @@ def collect_stage(
     settings: Settings,
     status_callback: StatusCallback | None = None,
 ) -> list[list[dict[str, Any]]]:
-    """Collect configured snapshots and persist the history artifact."""
+    """Read Kubernetes/Prometheus and write the configured samples JSON."""
     history = collect_history(settings, status_callback)
     write_json(settings.paths.samples, history)
     if status_callback:
@@ -30,7 +35,7 @@ def analyze_stage(
     settings: Settings,
     status_callback: StatusCallback | None = None,
 ) -> list[dict[str, Any]]:
-    """Calculate configured statistics from the persisted sample history."""
+    """Read samples, calculate statistics, and write workload statistics JSON."""
     history = read_json_list(settings.paths.samples, "Sample history")
     statistics = summarize_history(history, settings.statistics)
     write_json(settings.paths.statistics, statistics)
@@ -44,7 +49,11 @@ def recommend_stage(
     status_callback: StatusCallback | None = None,
     api_key: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Ask Gemini for proposals, guard each one, and persist the decisions."""
+    """Read statistics, ask Gemini, validate proposals, and write decisions.
+
+    ``api_key`` is injectable so the full pipeline can read the secret once and
+    pass it in without storing it in an artifact.
+    """
     workload_statistics = read_json_list(
         settings.paths.statistics, "Workload statistics"
     )
@@ -77,7 +86,7 @@ def report_stage(
     settings: Settings,
     status_callback: StatusCallback | None = None,
 ) -> list[dict[str, Any]]:
-    """Render a self-contained report from persisted guarded decisions."""
+    """Read statistics and guarded decisions, then write the HTML report."""
     statistics = read_json_list(
         settings.paths.statistics, "Workload statistics"
     )
@@ -95,7 +104,13 @@ def run_pipeline(
     settings: Settings,
     status_callback: StatusCallback | None = None,
 ) -> dict[str, Path | int]:
-    """Run collection through reporting with one preflighted command."""
+    """Run collection, analysis, recommendation, and reporting in order.
+
+    Returns:
+        A small completion summary containing workload counts and report path.
+    """
+    # Check the credential before a potentially long sampling window. This
+    # avoids collecting for several minutes only to discover a missing key.
     api_key = read_api_key(settings)
     if status_callback:
         status_callback("[1/4] Collecting Kubernetes and Prometheus history")

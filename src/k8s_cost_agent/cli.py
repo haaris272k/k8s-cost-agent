@@ -1,4 +1,9 @@
-"""Single command-line interface for full and stage-specific execution."""
+"""Expose the pipeline through one command-line interface.
+
+The CLI translates terminal arguments and common external errors into concise
+messages. Pipeline modules remain reusable because they do not parse arguments
+or terminate the process themselves.
+"""
 
 import argparse
 import sys
@@ -22,6 +27,7 @@ from k8s_cost_agent.recommendation.gemini import (
 
 
 def _parser() -> argparse.ArgumentParser:
+    """Build the command tree shared by the console script and module entrypoint."""
     parser = argparse.ArgumentParser(
         prog="k8s-cost-agent",
         description="Read-only Kubernetes resource recommendation pipeline",
@@ -43,17 +49,25 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _status(message: str) -> None:
+    """Print progress to stderr so normal stdout remains easy to consume."""
     print(message, file=sys.stderr, flush=True)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Load one configuration and dispatch the requested pipeline stage."""
+    """Load one configuration and dispatch the requested pipeline stage.
+
+    Args:
+        argv: Optional arguments used by tests. ``None`` reads the real command
+            line through :mod:`argparse`.
+    """
     args = _parser().parse_args(argv)
     try:
         settings = load_settings(args.config)
         if args.command == "check-config":
             print(f"Configuration is valid: {settings.source}")
             return
+        # Every command uses the same validated settings object, so stage runs
+        # and end-to-end runs interpret paths and safety thresholds identically.
         if args.command == "collect":
             collect_stage(settings, _status)
         elif args.command == "analyze":
@@ -68,6 +82,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                 f"Pipeline complete for {result['workloads']} workloads. "
                 f"Report: {result['report']}"
             )
+    # Translate expected operator errors into short terminal guidance. Unknown
+    # programming errors still keep their traceback for diagnosis.
     except RequestException as error:
         raise SystemExit(
             "Unable to reach configured Prometheus endpoint. "

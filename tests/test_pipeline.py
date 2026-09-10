@@ -1,8 +1,10 @@
+"""Tests that the end-to-end command runs every pipeline stage in order."""
+
 import unittest
 from unittest.mock import patch
 
 from k8s_cost_agent.pipeline import run_pipeline
-from tests.unit.helpers import SETTINGS
+from tests.helpers import SETTINGS
 
 
 class PipelineTests(unittest.TestCase):
